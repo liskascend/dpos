@@ -13,7 +13,11 @@ struct Delegate {
    let publicKey: String?
    let voters: [Voter]?
 
-   init(name: String, share: Double, address: String? = nil, publicKey: String? = nil, voters: [Voter]? = nil) {
+   init(name: String,
+        share: Double,
+        address: String? = nil,
+        publicKey: String? = nil,
+        voters: [Voter]? = nil) {
       self.name = name
       self.share = share
       self.address = address
@@ -27,22 +31,7 @@ struct Voter {
    let balance: Double
 }
 
-extension Double {
-   func rescaling(min: Double, max: Double, min1: Double, max1: Double) ->  Double {
-      return (max1-min1) / (max-min) * (self-max) + max1
-   }
-}
-
-/// Determine vote power distribution between voters
-func distribution(voters: [Voter]) -> [(address: String, perc: Double)] {
-   let sum = voters.reduce(0.0) { acc, curr in acc + curr.balance }
-   return voters.map { voter in
-      let value = voter.balance.rescaling(min: 0, max: sum, min1: 0, max1: 1)
-      return (address: voter.address, perc: value)
-   }
-}
-
-struct Manager {
+struct Stat {
    static func yaml(filePath: String) -> Yaml {
       do {
          let contents = try String(contentsOfFile: filePath)
@@ -61,7 +50,10 @@ struct Manager {
             let share = pool["share"].double else {
                fatalError()
          }
-         let delegate = Delegate(name: name, share: share)
+         let upgrade = pool["upgrades"].array?.first
+         let share2 = upgrade?["value"].double
+
+         let delegate = Delegate(name: name, share: share2 ?? share)
          delegates.append(delegate)
       }
       return delegates
@@ -80,9 +72,9 @@ struct Manager {
 }
 
 let filePath = "/Users/sdrpa/Desktop/DPOS/lisk.yml" // https://github.com/vekexasia/dpos-tools-data/blob/master/lisk.yml
-let yaml = Manager.yaml(filePath: filePath)
-let group: [String]? = Manager.namesForGroup("sherwood", yaml: yaml)
-let delegates = Manager.delegates(yaml: yaml)
+let yaml = Stat.yaml(filePath: filePath)
+let group: [String]? = Stat.namesForGroup("gdt", yaml: yaml)
+let delegates = Stat.delegates(yaml: yaml)
 
 // Get delegate info (address, publicKey)
 let theGroup = group?
