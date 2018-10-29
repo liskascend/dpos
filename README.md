@@ -1,6 +1,9 @@
 # Run script
+
+Examples:
 ```
 ./DPOS --group Elite --account 2797084409072178585L
+./DPOS --group GDT --account 2797084409072178585L
 ```
 
 Before running you need to start lisk docker (read below) so the script is able to fetch real-time data from lisk database.   
