@@ -13,7 +13,10 @@ The script takes in account:
 - Voter's balance
 - Number of voters for the delegate (more voters less each of them gets)
 
-# DPOS
+# Lisk Docker
+```
+cd lisk-docker
+```
 
 ### Start Lisk
 ```
