@@ -38,6 +38,15 @@
         }
       },
       {
+        "package": "SwiftPM",
+        "repositoryURL": "https://github.com/apple/swift-package-manager.git",
+        "state": {
+          "branch": null,
+          "revision": "235aacc514cb81a6881364b0fedcb3dd083228f3",
+          "version": "0.3.0"
+        }
+      },
+      {
         "package": "Then",
         "repositoryURL": "https://github.com/sdrpa/Then",
         "state": {

@@ -1,167 +1,41 @@
 // Created by Sinisa Drpa on 10/26/18.
 
 import Foundation
-import SwiftKuery
-import SwiftKueryPostgreSQL
-import Then
-import Yaml
+import Utility
 
-struct Delegate {
-   let name: String
-   let share: Double
-   let address: String?
-   let publicKey: String?
-   let voters: [Voter]?
+let arguments = Array(ProcessInfo.processInfo.arguments.dropFirst())
+let parser = ArgumentParser(usage: "<options>", overview: "It calculates Lisk DPOS rewards")
+let name: OptionArgument<String> = parser.add(option: "--group", shortName: "-g", kind: String.self, usage: "A group name (e.g. GDT, Elite)")
+let address: OptionArgument<String> = parser.add(option: "--address", shortName: "-a", kind: String.self, usage: "An account address (e.g. 2797084409072178585L")
 
-   init(name: String,
-        share: Double,
-        address: String? = nil,
-        publicKey: String? = nil,
-        voters: [Voter]? = nil) {
-      self.name = name
-      self.share = share
-      self.address = address
-      self.publicKey = publicKey
-      self.voters = voters
-   }
-}
+extension String: Error {}
 
-struct Voter {
+struct Params {
+   let group: String
    let address: String
-   let balance: Double
 }
 
-struct Stat {
-   static func yaml(filePath: String) -> Yaml {
-      do {
-         let contents = try String(contentsOfFile: filePath)
-         let yaml = try Yaml.load(contents)
-         return yaml
-      } catch let e {
-         fatalError(e.localizedDescription)
-      }
+func processArguments(arguments: ArgumentParser.Result) throws -> Params {
+   guard let name = arguments.get(name) else {
+      throw "A group name is required."
    }
-
-   static func delegates(yaml: Yaml) -> [Delegate] {
-      guard let pools = yaml["pools"].array else { fatalError() }
-      var delegates: [Delegate] =  []
-      for pool in pools {
-         guard let name = pool["delegate"].string,
-            let share = pool["share"].double else {
-               fatalError()
-         }
-         let upgrade = pool["upgrades"].array?.first
-         let share2 = upgrade?["value"].double
-
-         let delegate = Delegate(name: name, share: share2 ?? share)
-         delegates.append(delegate)
-      }
-      return delegates
+   guard let address = arguments.get(address) else {
+      throw "An account address is required."
    }
-
-   static func namesForGroup(_ groupName: String, yaml: Yaml) -> [String]? {
-      guard let groups = yaml["groups"].dictionary else { fatalError() }
-      guard let members = groups[.string(groupName)]?["members"].array else { fatalError() }
-      var names: [String] =  []
-      for name in members {
-         guard let name = name.string else { fatalError() }
-         names.append(name)
-      }
-      return names
-   }
+   return Params(group: name, address: address)
 }
 
-let filePath = "/Users/sdrpa/Desktop/DPOS/lisk.yml" // https://github.com/vekexasia/dpos-tools-data/blob/master/lisk.yml
-let yaml = Stat.yaml(filePath: filePath)
-let group: [String]? = Stat.namesForGroup("gdt", yaml: yaml)
-let delegates = Stat.delegates(yaml: yaml)
-
-// Get delegate info (address, publicKey)
-let theGroup = group?
-   .compactMap({ name in
-      delegates.first(where: { $0.name == name })
-   })
-   .compactMap({ delegate -> Delegate in
-      struct Result: Mappable {
-         let address: String
-         let publicKey: String
-
-         init(rows: [String : Any]) {
-            guard let address = rows["address"] as? String else { fatalError() }
-            guard let publicKey = rows["publicKey"] as? String else { fatalError() }
-            self.address = address
-            self.publicKey = publicKey
-         }
-      }
-
-      guard let result = try? await(perfromQuery(
-         """
-         SELECT address, encode(mem_accounts."publicKey", 'hex') AS "publicKey"
-         FROM mem_accounts
-         WHERE username = '\(delegate.name)'
-         """) { (resultSet: ResultSet) -> Result in
-            guard let result = DB.rows(from: resultSet).map(Result.init(rows:)).first else { fatalError() }
-            return result
-      }) else { fatalError() }
-
-      return Delegate(name: delegate.name, share: delegate.share, address: result.address, publicKey: result.publicKey)
-   })
-   .compactMap({ delegate -> Delegate in
-      struct Result: Mappable {
-         let address: String
-         let balance: Double
-
-         init(rows: [String : Any]) {
-            guard let address = rows["address"] as? String else { fatalError() }
-            guard let balance = rows["balance"] as? String else { fatalError() }
-            self.address = address
-            self.balance = Double(balance) ?? 0
-         }
-      }
-
-      guard let publicKey = delegate.publicKey else { fatalError() }
-      guard let results = try? await(perfromQuery(
-         """
-         SELECT accounts.address,
-            trunc(accounts.balance::numeric/100000000, 0) AS balance
-         FROM mem_accounts2delegates delegates
-         INNER JOIN mem_accounts accounts ON delegates."accountId" = accounts.address
-         """ +
-         " WHERE delegates.\"dependentId\" = '" + publicKey + "'" +
-         """
-         ORDER BY accounts.balance DESC;
-         """) { (resultSet: ResultSet) -> [Result] in
-            let rows = DB.rows(from: resultSet).map(Result.init(rows:))
-            return rows
-      }) else { fatalError() }
-
-      return Delegate(name: delegate.name, share: delegate.share, address: delegate.address, publicKey: delegate.publicKey, voters: results.map { Voter(address: $0.address, balance: $0.balance) })
-   })
-//print(theGroup?.first?.name, theGroup?.first?.voters?.count)
-// Now we have complete info
-
-let me = Voter(address: "dummy", balance: 1_000)
-let forgedPerMonth = 10_088.0
-
-guard let pool = theGroup else { fatalError() }
-
-var total = 0.0
-for delegate in pool {
-   guard let voters = delegate.voters else { fatalError() }
-   let dist = distribution(voters: voters + [me])
-   let sum = dist.reduce(0.0) { acc, curr in acc + curr.perc }
-   assert(sum >= 0.9 && sum <= 1.1)
-   //print(dist.reduce(0.0, { acc, curr in acc + curr.perc }))
-   let shared = forgedPerMonth * delegate.share / 100.0
-   // (address: String, perc: Double)
-   guard let votePower = dist.first(where: { $0.0 == me.address })?.perc else { fatalError() }
-   let reward = shared * votePower
-
-   let padding = 25
-   let namePadded = delegate.name.padding(toLength: padding, withPad: " ", startingAt: 0)
-   let sharePadded = "\(delegate.share)% = \(shared) LSK".padding(toLength: padding, withPad: " ", startingAt: 0)
-   let rewardPadded = String(format: "%.3f LSK", reward).padding(toLength: padding, withPad: " ", startingAt: 0)
-   print(namePadded + sharePadded + rewardPadded)
-   total += reward
+do {
+   let parsedArguments = try parser.parse(arguments)
+   let params = try processArguments(arguments: parsedArguments)
+   Stat.calculate(params: params)
 }
-print("---\nTotal: \(String(format: "%.3f LSK", total))")
+catch let error as ArgumentParserError {
+   print(error.description)
+}
+catch let error {
+   print(error)
+
+   guard let appName = ProcessInfo.processInfo.arguments.first?.components(separatedBy: "/").last else { fatalError() }
+   print("Example: ./\(appName) --group Elite --account 2797084409072178585L")
+}
